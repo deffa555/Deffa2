@@ -40,23 +40,62 @@ jobs:
 
       - name: Download ZIP
         run: |
-          curl -L -o project.zip "${{ github.event.inputs.zip_url }}"
-          unzip -q project.zip -d project/
+          echo "📥 Downloading project from: ${{ github.event.inputs.zip_url }}"
+          
+          # 🔥 PERBAIKAN: Gunakan curl dengan follow redirect dan header
+          curl -L -o project.zip \
+            -H "Accept: application/octet-stream" \
+            "${{ github.event.inputs.zip_url }}"
+          
+          # Cek apakah file berhasil di download
+          if [ ! -f "project.zip" ] || [ ! -s "project.zip" ]; then
+            echo "❌ Gagal download ZIP!"
+            exit 1
+          fi
+          
+          # Cek ukuran file
+          ls -la project.zip
+          
+          # Ekstrak
+          unzip -q project.zip -d project/ || {
+            echo "❌ Gagal ekstrak ZIP!"
+            exit 1
+          }
+          
+          ls -la project/
+
+      - name: Get Project Name
+        id: project_name
+        run: |
+          cd project/
+          if [ -f "pubspec.yaml" ]; then
+            NAME=$(grep "^name:" pubspec.yaml | awk '{print $2}')
+            echo "name=$NAME" >> $GITHUB_OUTPUT
+            echo "✅ Project name: $NAME"
+          else
+            echo "❌ pubspec.yaml tidak ditemukan!"
+            echo "name=flutter_app" >> $GITHUB_OUTPUT
+          fi
 
       - name: Build APK
         run: |
           cd project/
-          flutter pub get
+          flutter pub get || {
+            echo "❌ Flutter pub get gagal!"
+            exit 1
+          }
+          
           if [ "${{ github.event.inputs.build_type }}" == "debug" ]; then
+            echo "🔧 Building DEBUG APK..."
             flutter build apk --debug
           else
+            echo "🚀 Building RELEASE APK..."
             flutter build apk --release
           fi
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: app-apk
+          name: ${{ steps.project_name.outputs.name }}-apk
           path: project/build/app/outputs/flutter-apk/*.apk
           retention-days: 7
-          
