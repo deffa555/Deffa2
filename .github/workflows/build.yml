@@ -31,10 +31,140 @@ jobs:
         with:
           flutter-version: '3.24.0'
           channel: 'stable'
+          cache: true
 
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Download and Extract ZIP
+        run: |
+          echo "📥 Downloading project from: ${{ github.event.inputs.zip_url }}"
+          
+          # Download dengan header yang benar
+          curl -L -o project.zip \
+            -H "Accept: application/octet-stream" \
+            "${{ github.event.inputs.zip_url }}"
+          
+          # Cek apakah file berhasil di download
+          if [ ! -f "project.zip" ] || [ ! -s "project.zip" ]; then
+            echo "❌ Gagal download ZIP!"
+            exit 1
+          fi
+          
+          echo "📦 File size: $(du -h project.zip | cut -f1)"
+          
+          # Ekstrak dengan struktur folder yang benar
+          unzip -q project.zip -d project/ || {
+            echo "❌ Gagal ekstrak ZIP!"
+            exit 1
+          }
+          
+          # Cek struktur folder dan cari pubspec.yaml
+          echo "📂 Struktur folder:"
+          ls -la project/
+          
+          # Jika ada subfolder, pindahkan ke root
+          if [ -d "project/*" ] && [ ! -f "project/pubspec.yaml" ]; then
+            echo "📁 Mencari pubspec.yaml di subfolder..."
+            SUBFOLDER=$(find project -maxdepth 2 -name "pubspec.yaml" -printf "%h\n" | head -1)
+            if [ -n "$SUBFOLDER" ]; then
+              echo "📁 Ditemukan pubspec.yaml di: $SUBFOLDER"
+              mv "$SUBFOLDER"/* project/
+            fi
+          fi
+          
+          echo "📂 Struktur setelah penyesuaian:"
+          ls -la project/
+
+      - name: Get Project Name
+        id: project_name
+        run: |
+          cd project/
+          if [ -f "pubspec.yaml" ]; then
+            echo "✅ pubspec.yaml ditemukan!"
+            NAME=$(grep "^name:" pubspec.yaml | awk '{print $2}' | tr -d '\r')
+            echo "name=$NAME" >> $GITHUB_OUTPUT
+            echo "📛 Project name: $NAME"
+            
+            # Tampilkan isi pubspec.yaml
+            echo "📄 Isi pubspec.yaml:"
+            cat pubspec.yaml
+          else
+            echo "❌ pubspec.yaml TIDAK DITEMUKAN!"
+            echo "📂 Isi folder project:"
+            ls -la
+            exit 1
+          fi
+
+      - name: Clean Flutter Cache
+        run: |
+          cd project/
+          flutter clean || echo "⚠️ Flutter clean gagal, lanjut..."
+          rm -rf .dart_tool/ .packages pubspec.lock
+
+      - name: Get Dependencies
+        run: |
+          cd project/
+          echo "📦 Menjalankan flutter pub get..."
+          flutter pub get --verbose || {
+            echo "❌ Flutter pub get gagal!"
+            echo "📄 Mencoba debug dengan flutter pub get --verbose..."
+            flutter pub get --verbose
+            exit 1
+          }
+          
+          echo "✅ Dependencies berhasil diinstall!"
+          echo "📦 Daftar dependencies:"
+          flutter pub deps
+
+      - name: Build APK
+        run: |
+          cd project/
+          
+          if [ "${{ github.event.inputs.build_type }}" == "debug" ]; then
+            echo "🔧 Building DEBUG APK..."
+            flutter build apk --debug --verbose || {
+              echo "❌ Build debug gagal!"
+              exit 1
+            }
+          else
+            echo "🚀 Building RELEASE APK..."
+            flutter build apk --release --verbose || {
+              echo "❌ Build release gagal!"
+              echo "🔧 Mencoba build dengan --no-shrink..."
+              flutter build apk --release --no-shrink || {
+                exit 1
+              }
+            }
+          fi
+          
+          echo "✅ Build selesai!"
+          echo "📂 Hasil build:"
+          ls -la build/app/outputs/flutter-apk/ || echo "⚠️ Folder APK tidak ditemukan!"
+
+      - name: Find and Upload APK
+        run: |
+          cd project/
+          APK_PATH=$(find build/app/outputs/flutter-apk/ -name "*.apk" | head -1)
+          if [ -n "$APK_PATH" ]; then
+            echo "✅ APK ditemukan: $APK_PATH"
+            echo "APK_PATH=$APK_PATH" >> $GITHUB_ENV
+          else
+            echo "❌ APK tidak ditemukan!"
+            echo "📂 Mencari di seluruh folder..."
+            find . -name "*.apk" 2>/dev/null || echo "Tidak ada APK"
+            exit 1
+          fi
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.project_name.outputs.name }}-apk
+          path: project/${{ env.APK_PATH }}
+          retention-days: 7        with:
           distribution: 'zulu'
           java-version: '17'
 
