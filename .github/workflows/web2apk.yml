@@ -1,0 +1,100 @@
+name: Web to APK Converter
+
+on:
+  workflow_dispatch:
+    inputs:
+      web_url:
+        description: 'Website URL'
+        required: true
+        type: string
+      app_name:
+        description: 'App Name'
+        required: true
+        type: string
+      icon_url:
+        description: 'Icon URL'
+        required: true
+        type: string
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.0'
+          channel: 'stable'
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Create WebView App
+        run: |
+          flutter create --org com.webtoapk --project-name webview_app webview_project
+          cd webview_project
+          curl -L -o icon.png "${{ github.event.inputs.icon_url }}"
+          echo "  webview_flutter: ^4.7.0" >> pubspec.yaml
+          echo "  assets:" >> pubspec.yaml
+          echo "    - icon.png" >> pubspec.yaml
+          
+          cat > lib/main.dart << 'DART'
+          import 'package:flutter/material.dart';
+          import 'package:webview_flutter/webview_flutter.dart';
+
+          void main() => runApp(const MyApp());
+
+          class MyApp extends StatelessWidget {
+            const MyApp({super.key});
+            @override
+            Widget build(BuildContext context) {
+              return MaterialApp(
+                title: '${{ github.event.inputs.app_name }}',
+                home: const WebViewScreen(),
+                debugShowCheckedModeBanner: false,
+              );
+            }
+          }
+
+          class WebViewScreen extends StatefulWidget {
+            const WebViewScreen({super.key});
+            @override
+            State<WebViewScreen> createState() => _WebViewScreenState();
+          }
+
+          class _WebViewScreenState extends State<WebViewScreen> {
+            late final WebViewController controller;
+            @override
+            void initState() {
+              super.initState();
+              controller = WebViewController()
+                ..setJavaScriptMode(JavaScriptMode.unrestricted)
+                ..loadRequest(Uri.parse('${{ github.event.inputs.web_url }}'));
+            }
+            @override
+            Widget build(BuildContext context) {
+              return Scaffold(body: WebViewWidget(controller: controller));
+            }
+          }
+          DART
+
+      - name: Build APK
+        run: |
+          cd webview_project
+          flutter pub get
+          flutter build apk --release
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ github.event.inputs.app_name }}-web2apk
+          path: webview_project/build/app/outputs/flutter-apk/*.apk
+          retention-days: 7
