@@ -41,130 +41,103 @@ jobs:
 
       - name: Download and Extract ZIP
         run: |
-          echo "📥 Downloading project from: ${{ github.event.inputs.zip_url }}"
-          
-          curl -L -o project.zip \
-            -H "Accept: application/octet-stream" \
-            "${{ github.event.inputs.zip_url }}"
+          echo "📥 Downloading project..."
+          curl -L -o project.zip -H "Accept: application/octet-stream" "${{ github.event.inputs.zip_url }}"
           
           if [ ! -f "project.zip" ] || [ ! -s "project.zip" ]; then
             echo "❌ Gagal download ZIP!"
             exit 1
           fi
           
-          echo "📦 File size: $(du -h project.zip | cut -f1)"
-          
           mkdir -p project
-          unzip -q project.zip -d project/ || {
-            echo "❌ Gagal ekstrak ZIP!"
-            exit 1
-          }
+          unzip -q project.zip -d project/ || { echo "❌ Gagal ekstrak!"; exit 1; }
           
-          echo "📂 Struktur folder:"
+          echo "📂 Struktur:"
           ls -la project/
           
-          # 🔥 CARI PUBSPEC.YAML
-          echo "🔍 Mencari pubspec.yaml..."
-          find project -name "pubspec.yaml" -exec ls -la {} \;
-          
+          # Cari pubspec.yaml
           PUBSPEC_PATH=$(find project -name "pubspec.yaml" | head -1)
           if [ -n "$PUBSPEC_PATH" ]; then
             echo "✅ Ditemukan pubspec.yaml di: $PUBSPEC_PATH"
             PUBSPEC_DIR=$(dirname "$PUBSPEC_PATH")
-            echo "📁 Folder pubspec: $PUBSPEC_DIR"
-            
-            # Pindahkan semua isi folder ke root
             mv "$PUBSPEC_DIR"/* project/ 2>/dev/null || true
-            mv "$PUBSPEC_DIR"/.[!.]* project/ 2>/dev/null || true
           fi
           
-          echo "📂 Struktur setelah:"
+          echo "📂 Setelah:"
           ls -la project/
           
-          if [ -f "project/pubspec.yaml" ]; then
-            echo "✅ pubspec.yaml ditemukan!"
-            cat project/pubspec.yaml
-          else
+          if [ ! -f "project/pubspec.yaml" ]; then
             echo "❌ pubspec.yaml TIDAK DITEMUKAN!"
             find project -type f
             exit 1
           fi
+          
+          echo "✅ pubspec.yaml:"
+          cat project/pubspec.yaml
 
       - name: Get Project Name
         id: project_name
         run: |
           cd project/
-          if [ -f "pubspec.yaml" ]; then
-            NAME=$(grep "^name:" pubspec.yaml | awk '{print $2}' | tr -d '\r')
-            echo "name=$NAME" >> $GITHUB_OUTPUT
-            echo "📛 Project name: $NAME"
-          else
-            echo "❌ pubspec.yaml TIDAK ADA!"
-            exit 1
-          fi
+          NAME=$(grep "^name:" pubspec.yaml | awk '{print $2}' | tr -d '\r')
+          echo "name=$NAME" >> $GITHUB_OUTPUT
+          echo "📛 Project: $NAME"
 
-      - name: 🔥 FORCE FIX pubspec.yaml
+      - name: 🔥 FIX AND BUILD
         run: |
           cd project/
           
-          echo "📄 Isi pubspec.yaml SEBELUM fix:"
+          echo "📄 pubspec.yaml ASLI:"
           cat pubspec.yaml
           
-          # Backup
-          cp pubspec.yaml pubspec.yaml.bak
-          
-          # 🔥 HAPUS SEMUA KOMENTAR DAN KARAKTER ANEH
-          sed -i 's/#.*$//g' pubspec.yaml
-          sed -i 's/\r$//g' pubspec.yaml
-          sed -i '/^[[:space:]]*$/d' pubspec.yaml
-          sed -i 's/^[[:space:]]*//' pubspec.yaml
-          
-          # 🔥 PASTIKAN FORMATNYA BENAR
-          cat > pubspec.yaml.tmp << 'EOF'
+          # 🔥 BUAT PUBSPEC.YAML BARU YANG PASTI VALID
+          cat > pubspec.yaml << 'EOF'
           name: ${{ steps.project_name.outputs.name }}
-          description: A Flutter project
+          description: A new Flutter project.
+          publish_to: 'none'
           version: 1.0.0+1
+
           environment:
-            sdk: ">=3.0.0 <4.0.0"
+            sdk: '>=3.0.0 <4.0.0'
+
           dependencies:
             flutter:
               sdk: flutter
             cupertino_icons: ^1.0.6
+
           dev_dependencies:
             flutter_test:
               sdk: flutter
             flutter_lints: ^3.0.0
+
           flutter:
             uses-material-design: true
           EOF
           
-          # Gabungkan dengan yang asli
-          cat pubspec.yaml.tmp > pubspec.yaml
-          
-          echo "📄 Isi pubspec.yaml SESUDAH fix:"
+          echo "📄 pubspec.yaml BARU:"
           cat pubspec.yaml
-
-      - name: Get Dependencies
-        run: |
-          cd project/
+          
+          # Clean dan install
           flutter clean || true
           rm -rf .dart_tool/ .packages pubspec.lock
-          flutter pub get --verbose || {
-            echo "❌ Flutter pub get gagal!"
-            echo "📄 Coba tanpa cache..."
-            flutter pub get --no-cache || exit 1
-          }
-          echo "✅ Dependencies berhasil diinstall!"
-
-      - name: Build APK
-        run: |
-          cd project/
           
+          echo "📦 Flutter pub get..."
+          flutter pub get --verbose || {
+            echo "❌ Gagal, coba tanpa cache..."
+            flutter pub get --no-cache || {
+              echo "❌ Masih gagal, coba offline..."
+              flutter pub get --offline || exit 1
+            }
+          }
+          
+          echo "✅ Dependencies OK!"
+          
+          # Build
           if [ "${{ github.event.inputs.build_type }}" == "debug" ]; then
-            echo "🔧 Building DEBUG APK..."
-            flutter build apk --debug
+            echo "🔧 Build DEBUG..."
+            flutter build apk --debug || exit 1
           else
-            echo "🚀 Building RELEASE APK..."
+            echo "🚀 Build RELEASE..."
             flutter build apk --release || {
               echo "⚠️ Coba --no-shrink..."
               flutter build apk --release --no-shrink || exit 1
