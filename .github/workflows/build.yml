@@ -54,21 +54,19 @@ jobs:
           
           echo "📦 File size: $(du -h project.zip | cut -f1)"
           
-          # Ekstrak ZIP
           mkdir -p project
           unzip -q project.zip -d project/ || {
             echo "❌ Gagal ekstrak ZIP!"
             exit 1
           }
           
-          echo "📂 Struktur folder (sebelum):"
+          echo "📂 Struktur folder:"
           ls -la project/
           
-          # 🔥 CARI PUBSPEC.YAML DI MANA PUN 🔥
+          # 🔥 CARI PUBSPEC.YAML
           echo "🔍 Mencari pubspec.yaml..."
           find project -name "pubspec.yaml" -exec ls -la {} \;
           
-          # Pindahkan pubspec.yaml ke root
           PUBSPEC_PATH=$(find project -name "pubspec.yaml" | head -1)
           if [ -n "$PUBSPEC_PATH" ]; then
             echo "✅ Ditemukan pubspec.yaml di: $PUBSPEC_PATH"
@@ -80,17 +78,14 @@ jobs:
             mv "$PUBSPEC_DIR"/.[!.]* project/ 2>/dev/null || true
           fi
           
-          # Cek lagi
-          echo "📂 Struktur folder (sesudah):"
+          echo "📂 Struktur setelah:"
           ls -la project/
           
-          # Cek pubspec.yaml
           if [ -f "project/pubspec.yaml" ]; then
-            echo "✅ pubspec.yaml ditemukan di root!"
+            echo "✅ pubspec.yaml ditemukan!"
             cat project/pubspec.yaml
           else
             echo "❌ pubspec.yaml TIDAK DITEMUKAN!"
-            echo "📂 Mencari semua file:"
             find project -type f
             exit 1
           fi
@@ -105,37 +100,61 @@ jobs:
             echo "📛 Project name: $NAME"
           else
             echo "❌ pubspec.yaml TIDAK ADA!"
-            echo "📂 Isi folder:"
-            ls -la
             exit 1
           fi
 
-      - name: Clean and Get Dependencies
+      - name: 🔥 FORCE FIX pubspec.yaml
+        run: |
+          cd project/
+          
+          echo "📄 Isi pubspec.yaml SEBELUM fix:"
+          cat pubspec.yaml
+          
+          # Backup
+          cp pubspec.yaml pubspec.yaml.bak
+          
+          # 🔥 HAPUS SEMUA KOMENTAR DAN KARAKTER ANEH
+          sed -i 's/#.*$//g' pubspec.yaml
+          sed -i 's/\r$//g' pubspec.yaml
+          sed -i '/^[[:space:]]*$/d' pubspec.yaml
+          sed -i 's/^[[:space:]]*//' pubspec.yaml
+          
+          # 🔥 PASTIKAN FORMATNYA BENAR
+          cat > pubspec.yaml.tmp << 'EOF'
+          name: ${{ steps.project_name.outputs.name }}
+          description: A Flutter project
+          version: 1.0.0+1
+          environment:
+            sdk: ">=3.0.0 <4.0.0"
+          dependencies:
+            flutter:
+              sdk: flutter
+            cupertino_icons: ^1.0.6
+          dev_dependencies:
+            flutter_test:
+              sdk: flutter
+            flutter_lints: ^3.0.0
+          flutter:
+            uses-material-design: true
+          EOF
+          
+          # Gabungkan dengan yang asli
+          cat pubspec.yaml.tmp > pubspec.yaml
+          
+          echo "📄 Isi pubspec.yaml SESUDAH fix:"
+          cat pubspec.yaml
+
+      - name: Get Dependencies
         run: |
           cd project/
           flutter clean || true
           rm -rf .dart_tool/ .packages pubspec.lock
-          flutter pub get --verbose
-          
-          if [ $? -ne 0 ]; then
+          flutter pub get --verbose || {
             echo "❌ Flutter pub get gagal!"
-            echo "📄 Coba fix pubspec.yaml..."
-            
-            # Backup dulu
-            cp pubspec.yaml pubspec.yaml.bak
-            
-            # Hapus comment dan karakter aneh
-            sed -i 's/#.*$//g' pubspec.yaml
-            sed -i 's/\r$//g' pubspec.yaml
-            
-            echo "📄 pubspec.yaml setelah fix:"
-            cat pubspec.yaml
-            
-            flutter pub get --verbose || exit 1
-          fi
-          
+            echo "📄 Coba tanpa cache..."
+            flutter pub get --no-cache || exit 1
+          }
           echo "✅ Dependencies berhasil diinstall!"
-          flutter pub deps
 
       - name: Build APK
         run: |
@@ -143,11 +162,11 @@ jobs:
           
           if [ "${{ github.event.inputs.build_type }}" == "debug" ]; then
             echo "🔧 Building DEBUG APK..."
-            flutter build apk --debug --verbose
+            flutter build apk --debug
           else
             echo "🚀 Building RELEASE APK..."
-            flutter build apk --release --verbose || {
-              echo "⚠️ Build release gagal, coba dengan --no-shrink..."
+            flutter build apk --release || {
+              echo "⚠️ Coba --no-shrink..."
               flutter build apk --release --no-shrink || exit 1
             }
           fi
