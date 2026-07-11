@@ -34,26 +34,44 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.24.0'
+          flutter-version: '3.22.0'
           channel: 'stable'
           cache: true
+
+      - name: Enable Flutter Desktop
+        run: |
+          flutter config --no-enable-web
+          flutter config --no-enable-linux-desktop
+          flutter config --no-enable-macos-desktop
+          flutter config --no-enable-windows-desktop
+          flutter config --no-enable-cxx
 
       - name: Install Dependencies
         run: flutter pub get
 
+      - name: Clean Build
+        run: flutter clean
+
       - name: Build APK
         run: |
           if [ "${{ inputs.build_mode }}" == "debug" ]; then
-            flutter build apk --debug
+            flutter build apk --debug --no-tree-shake-icons
           else
-            flutter build apk --release
+            flutter build apk --release --no-tree-shake-icons
           fi
+
+      - name: List APK Files
+        run: |
+          echo "📦 APK Files:"
+          ls -la build/app/outputs/flutter-apk/ || echo "No APK found"
 
       - name: Upload APK to Artifact
         uses: actions/upload-artifact@v4
         with:
           name: flutter-apk
-          path: build/app/outputs/flutter-apk/*.apk
+          path: |
+            build/app/outputs/flutter-apk/*.apk
+            build/app/outputs/apk/**/*.apk
           retention-days: 7
 
       - name: Upload to Release
