@@ -3,35 +3,27 @@ name: Flutter Build APK
 on:
   workflow_dispatch:
     inputs:
-      zip_url:
-        description: 'URL ZIP file'
+      release_tag:
+        description: 'Release Tag'
         required: true
         type: string
-      tag:
-        description: 'Release tag'
+      build_mode:
+        description: 'Build Mode (debug/release)'
         required: true
-        type: string
-      build_type:
-        description: 'Build type (debug/release)'
-        required: false
         default: 'release'
-        type: string
+        type: choice
+        options:
+          - debug
+          - release
 
 jobs:
   build:
+    name: Build Flutter APK
     runs-on: ubuntu-latest
-    timeout-minutes: 30
     
     steps:
-      - name: Checkout
+      - name: Checkout Repository
         uses: actions/checkout@v4
-
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: '3.27.0'  # 🔥 PAKE VERSI TERBARU!
-          channel: 'stable'
-          cache: true
 
       - name: Setup Java
         uses: actions/setup-java@v4
@@ -39,35 +31,37 @@ jobs:
           distribution: 'zulu'
           java-version: '17'
 
-      - name: Download ZIP
-        run: |
-          curl -L -o project.zip "${{ github.event.inputs.zip_url }}"
-          unzip -q project.zip -d project/
-          ls -la project/
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.0'
+          channel: 'stable'
+          cache: true
 
-      - name: Get Project Name
-        id: name
-        run: |
-          cd project/
-          if [ -f "pubspec.yaml" ]; then
-            NAME=$(grep "^name:" pubspec.yaml | awk '{print $2}')
-            echo "name=$NAME" >> $GITHUB_OUTPUT
-          else
-            echo "name=app" >> $GITHUB_OUTPUT
-          fi
+      - name: Install Dependencies
+        run: flutter pub get
 
       - name: Build APK
         run: |
-          cd project/
-          flutter clean || true
-          rm -rf .dart_tool/ .packages pubspec.lock
-          flutter pub get
-          flutter build apk --release
-          ls -la build/app/outputs/flutter-apk/
+          if [ "${{ inputs.build_mode }}" == "debug" ]; then
+            flutter build apk --debug
+          else
+            flutter build apk --release
+          fi
 
-      - name: Upload APK
+      - name: Upload APK to Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.name.outputs.name }}-apk
-          path: project/build/app/outputs/flutter-apk/*.apk
+          name: flutter-apk
+          path: build/app/outputs/flutter-apk/*.apk
           retention-days: 7
+
+      - name: Upload to Release
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ github.event.inputs.release_tag }}
+          asset_path: build/app/outputs/flutter-apk/app-${{ inputs.build_mode }}.apk
+          asset_name: app-${{ inputs.build_mode }}.apk
+          asset_content_type: application/vnd.android.package-archive
