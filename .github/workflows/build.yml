@@ -1,101 +1,31 @@
-name: Flutter Build APK
+name: Build Flutter APK
 
 on:
+  push:
+    branches: [ main ]
   workflow_dispatch:
-    inputs:
-      zip_url:
-        description: 'Download URL ZIP Project'
-        required: true
-        type: string
-      tag:
-        description: 'Release Tag'
-        required: true
-        type: string
-      build_type:
-        description: 'Build Type'
-        required: true
-        default: 'release'
-        type: choice
-        options:
-          - debug
-          - release
 
 jobs:
   build:
-    name: Build APK from ZIP
     runs-on: ubuntu-latest
-    timeout-minutes: 30
     
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'zulu'
-          java-version: '17'
-
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: '3.22.0'
-          channel: 'stable'
-          cache: true
-
-      - name: Download ZIP
-        run: |
-          echo "📥 Downloading ZIP from ${{ inputs.zip_url }}"
-          curl -L -o project.zip "${{ inputs.zip_url }}"
-          ls -la
-
-      - name: Extract Project
-        run: |
-          mkdir project
-          unzip -q project.zip -d project
-          cd project
-          ls -la
-          echo "📂 Project extracted!"
-
-      - name: Install Dependencies
-        run: |
-          cd project
-          flutter pub get
-
-      - name: Clean Build
-        run: |
-          cd project
-          flutter clean
-
-      - name: Build APK
-        run: |
-          cd project
-          if [ "${{ inputs.build_type }}" == "debug" ]; then
-            flutter build apk --debug --no-tree-shake-icons
-          else
-            flutter build apk --release --no-tree-shake-icons
-          fi
-
-      - name: List APK Files
-        run: |
-          echo "📦 APK Files:"
-          find . -name "*.apk" -ls || echo "❌ No APK found!"
-
-      - name: Upload APK to Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: flutter-apk
-          path: |
-            **/build/app/outputs/flutter-apk/*.apk
-            **/build/app/outputs/apk/**/*.apk
-          retention-days: 7
-
-      - name: Upload to Release
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ github.event.inputs.tag }}
-          asset_path: **/build/app/outputs/flutter-apk/*.apk
-          asset_name: app-${{ inputs.build_type }}.apk
-          asset_content_type: application/vnd.android.package-archive
+    - uses: actions/checkout@v4
+    
+    - name: Setup Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: '3.22.0'
+        channel: 'stable'
+    
+    - name: Get dependencies
+      run: flutter pub get
+    
+    - name: Build APK
+      run: flutter build apk --release
+    
+    - name: Upload APK
+      uses: actions/upload-artifact@v4
+      with:
+        name: release-apk
+        path: build/app/outputs/flutter-apk/app-release.apk
